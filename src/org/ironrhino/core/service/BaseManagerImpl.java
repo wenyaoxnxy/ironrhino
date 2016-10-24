@@ -11,12 +11,17 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 
+import javax.persistence.NoResultException;
 import javax.persistence.PostPersist;
 import javax.persistence.PostRemove;
 import javax.persistence.PostUpdate;
 import javax.persistence.PrePersist;
 import javax.persistence.PreRemove;
 import javax.persistence.PreUpdate;
+import javax.persistence.TypedQuery;
+import javax.persistence.criteria.CriteriaBuilder;
+import javax.persistence.criteria.CriteriaQuery;
+import javax.persistence.criteria.Root;
 
 import org.apache.commons.lang3.StringUtils;
 import org.hibernate.CacheMode;
@@ -25,7 +30,6 @@ import org.hibernate.FlushMode;
 import org.hibernate.Hibernate;
 import org.hibernate.LockOptions;
 import org.hibernate.ObjectNotFoundException;
-import org.hibernate.Query;
 import org.hibernate.ScrollMode;
 import org.hibernate.ScrollableResults;
 import org.hibernate.Session;
@@ -127,12 +131,12 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 			final BaseTreeableEntity entity = (BaseTreeableEntity) obj;
 			boolean childrenNeedChange = false;
 			if (entity.isNew()) {
-				FlushMode mode = session.getFlushMode();
-				session.setFlushMode(FlushMode.MANUAL);
+				FlushMode mode = session.getHibernateFlushMode();
+				session.setHibernateFlushMode(FlushMode.MANUAL);
 				entity.setFullId("");
 				session.save(entity);
 				session.flush();
-				session.setFlushMode(mode);
+				session.setHibernateFlushMode(mode);
 			} else {
 				childrenNeedChange = (entity.getParent() == null && entity.getLevel() != 1
 						|| entity.getParent() != null && (entity.getLevel() - entity.getParent().getLevel() != 1
@@ -438,15 +442,20 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 	@Override
 	@Transactional(readOnly = true)
 	public List<T> findAll(Order... orders) {
-		Criteria c = sessionFactory.getCurrentSession().createCriteria(getEntityClass());
-		c.setResultTransformer(CriteriaSpecification.DISTINCT_ROOT_ENTITY);
+		CriteriaBuilder cb = sessionFactory.getCriteriaBuilder();
+		CriteriaQuery<T> cq = cb.createQuery(getEntityClass());
+		Root<?> root = cq.from(getEntityClass());
 		if (orders.length == 0) {
 			if (Ordered.class.isAssignableFrom(getEntityClass()))
-				c.addOrder(Order.asc("displayOrder"));
-		} else
-			for (Order order : orders)
-				c.addOrder(order);
-		return c.list();
+				cq.orderBy(cb.asc(root.get("displayOrder")));
+		} else {
+			javax.persistence.criteria.Order[] _orders = new javax.persistence.criteria.Order[orders.length];
+			for (int i = 0; i < orders.length; i++)
+				_orders[i] = orders[i].isAscending() ? cb.asc(root.get(orders[i].getPropertyName()))
+						: cb.desc(root.get(orders[i].getPropertyName()));
+			cq.orderBy(_orders);
+		}
+		return sessionFactory.getCurrentSession().createQuery(cq).getResultList();
 	}
 
 	@Override
@@ -461,21 +470,28 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 				arr[i] = (Serializable) objs[i];
 			objects = arr;
 		}
-		Criteria c = sessionFactory.getCurrentSession().createCriteria(getEntityClass());
+		CriteriaBuilder cb = sessionFactory.getCriteriaBuilder();
+		CriteriaQuery<T> cq = cb.createQuery(getEntityClass());
+		Root<?> root = cq.from(getEntityClass());
 		if (objects.length == 1) {
 			Set<String> naturalIds = AnnotationUtils.getAnnotatedPropertyNames(getEntityClass(), NaturalId.class);
 			if (naturalIds.size() != 1)
 				throw new IllegalArgumentException("@NaturalId must and only be one");
-			c.add(Restrictions.eq(naturalIds.iterator().next(), objects[0]));
+			cq.where(cb.equal(root.get(naturalIds.iterator().next()), objects[0]));
 		} else {
 			if (objects.length == 0 || objects.length % 2 != 0)
 				throw new IllegalArgumentException("parameter size must be even");
 			int doubles = objects.length / 2;
 			for (int i = 0; i < doubles; i++)
-				c.add(Restrictions.eq(String.valueOf(objects[2 * i]), objects[2 * i + 1]));
+				cq.where(cb.equal(root.get(String.valueOf(objects[2 * i])), objects[2 * i + 1]));
 		}
-		c.setMaxResults(1);
-		return (T) c.uniqueResult();
+		TypedQuery<T> query = sessionFactory.getCurrentSession().createQuery(cq);
+		query.setMaxResults(1);
+		try {
+			return query.getSingleResult();
+		} catch (NoResultException e) {
+			return null;
+		}
 	}
 
 	@Override
@@ -494,21 +510,28 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 				arr[i] = (Serializable) objs[i];
 			objects = arr;
 		}
-		Criteria c = sessionFactory.getCurrentSession().createCriteria(getEntityClass());
+		CriteriaBuilder cb = sessionFactory.getCriteriaBuilder();
+		CriteriaQuery<T> cq = cb.createQuery(getEntityClass());
+		Root<?> root = cq.from(getEntityClass());
 		if (objects.length == 1) {
 			Set<String> naturalIds = AnnotationUtils.getAnnotatedPropertyNames(getEntityClass(), NaturalId.class);
 			if (naturalIds.size() != 1)
 				throw new IllegalArgumentException("@NaturalId must and only be one");
-			c.add(Restrictions.eq(naturalIds.iterator().next(), objects[0]));
+			cq.where(cb.equal(root.get(naturalIds.iterator().next()), objects[0]));
 		} else {
 			if (objects.length == 0 || objects.length % 2 != 0)
 				throw new IllegalArgumentException("parameter size must be even");
 			int doubles = objects.length / 2;
 			for (int i = 0; i < doubles; i++)
-				c.add(Restrictions.eq(String.valueOf(objects[2 * i]), objects[2 * i + 1]));
+				cq.where(cb.equal(root.get(String.valueOf(objects[2 * i])), objects[2 * i + 1]));
 		}
-		c.setMaxResults(1);
-		return (T) c.uniqueResult();
+		TypedQuery<T> query = sessionFactory.getCurrentSession().createQuery(cq);
+		query.setMaxResults(1);
+		try {
+			return query.getSingleResult();
+		} catch (NoResultException e) {
+			return null;
+		}
 	}
 
 	@Override
@@ -519,8 +542,8 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 		for (Serializable ser : objects)
 			if (ser == null || ser instanceof Persistable && ((Persistable) ser).isNew())
 				return null;
-		String hql = "select entity from " + getEntityClass().getName() + " entity where ";
-		Query query;
+		String hql = "from " + getEntityClass().getName() + " entity where ";
+		TypedQuery<T> query;
 		if (objects.length == 1) {
 			Set<String> naturalIds = AnnotationUtils.getAnnotatedPropertyNames(getEntityClass(), NaturalId.class);
 			if (naturalIds.size() != 1)
@@ -529,8 +552,6 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 			query = sessionFactory.getCurrentSession().createQuery(hql);
 			query.setParameter("1", objects[0]);
 		} else {
-			if (objects.length == 0 || objects.length % 2 != 0)
-				throw new IllegalArgumentException("parameter size must be even");
 			int doubles = objects.length / 2;
 			if (doubles == 1) {
 				hql += "lower(entity." + String.valueOf(objects[0]) + ")=lower(?1)";
@@ -545,16 +566,20 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 				query.setParameter(String.valueOf(i + 1), objects[2 * i + 1]);
 		}
 		query.setMaxResults(1);
-		return (T) query.uniqueResult();
+		try {
+			return query.getSingleResult();
+		} catch (NoResultException e) {
+			return null;
+		}
 	}
 
 	@Override
 	@Transactional(readOnly = true)
 	public List<T> find(final String queryString, final Object... args) {
-		Query query = sessionFactory.getCurrentSession().createQuery(queryString);
+		TypedQuery<T> query = sessionFactory.getCurrentSession().createQuery(queryString);
 		for (int i = 0; i < args.length; i++)
 			query.setParameter(String.valueOf(i + 1), args[i]);
-		return query.list();
+		return query.getResultList();
 	}
 
 	@Override
@@ -621,7 +646,7 @@ public abstract class BaseManagerImpl<T extends Persistable<?>> implements BaseM
 	@Override
 	@Transactional
 	public int executeUpdate(String queryString, Object... values) {
-		Query queryObject = sessionFactory.getCurrentSession().createQuery(queryString);
+		TypedQuery queryObject = sessionFactory.getCurrentSession().createQuery(queryString);
 		for (int i = 0; i < values.length; i++) {
 			queryObject.setParameter(String.valueOf(i + 1), values[i]);
 		}

@@ -15,8 +15,8 @@ import javax.persistence.PostUpdate;
 import javax.persistence.PrePersist;
 import javax.persistence.PreRemove;
 import javax.persistence.PreUpdate;
+import javax.persistence.TypedQuery;
 
-import org.hibernate.Query;
 import org.hibernate.Session;
 import org.hibernate.criterion.DetachedCriteria;
 import org.hibernate.criterion.Order;
@@ -175,10 +175,10 @@ public class EntityManagerTest {
 		Person person = entityManager.executeFind(new HibernateCallback<Person>() {
 			@Override
 			public Person doInHibernate(Session session) {
-				Query q = session.createQuery("from Person p where p.name=:name");
-				q.setString("name", "test0");
+				TypedQuery<Person> q = session.createQuery("from Person p where p.name=:name", Person.class);
+				q.setParameter("name", "test0");
 				q.setMaxResults(1);
-				return (Person) q.uniqueResult();
+				return q.getSingleResult();
 			}
 		});
 		assertEquals("test0", person.getName());
